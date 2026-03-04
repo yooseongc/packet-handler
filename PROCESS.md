@@ -33,7 +33,9 @@
 - [x] `analyze` 출력 가독성 개선
   - conversation 집계 후 정렬된 표 형식 출력
   - TCP 상태(SYN/ACK/FIN/RST) + 재전송 카운트 표시
+  - TCP 컬럼 순서: #, packets, conversation, state, retrans
   - ICMP에서 icmpv6 type fallback 처리
+  - 레이어별 tshark display filter 적용(불필요 패킷 제외)
 
 ## 현재 상태
 - [x] 코드/문서 동기화 완료

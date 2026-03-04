@@ -204,22 +204,37 @@ fn process_pcapng(cli: &Cli, output: &Path) -> Result<()> {
 }
 
 fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(String, u64)>> {
-    let (display, fields): (&str, &[&str]) = match layer {
-        AnalyzeLayer::Ether => ("ETHER", &["eth.src", "eth.dst"]),
-        AnalyzeLayer::Ip => ("IP", &["ip.src", "ip.dst"]),
-        AnalyzeLayer::Tcp => ("TCP", &["ip.src", "tcp.srcport", "ip.dst", "tcp.dstport"]),
-        AnalyzeLayer::Icmp => ("ICMP", &["ip.src", "ip.dst", "icmp.type", "icmpv6.type"]),
-        AnalyzeLayer::Udp => ("UDP", &["ip.src", "udp.srcport", "ip.dst", "udp.dstport"]),
-        AnalyzeLayer::Arp => ("ARP", &["arp.src.proto_ipv4", "arp.dst.proto_ipv4"]),
+    let (display, dfilter, fields): (&str, Option<&str>, &[&str]) = match layer {
+        AnalyzeLayer::Ether => ("ETHER", Some("eth"), &["eth.src", "eth.dst"]),
+        AnalyzeLayer::Ip => ("IP", Some("ip"), &["ip.src", "ip.dst"]),
+        AnalyzeLayer::Tcp => (
+            "TCP",
+            Some("tcp"),
+            &["ip.src", "tcp.srcport", "ip.dst", "tcp.dstport"],
+        ),
+        AnalyzeLayer::Icmp => (
+            "ICMP",
+            Some("icmp || icmpv6"),
+            &["ip.src", "ip.dst", "icmp.type", "icmpv6.type"],
+        ),
+        AnalyzeLayer::Udp => (
+            "UDP",
+            Some("udp"),
+            &["ip.src", "udp.srcport", "ip.dst", "udp.dstport"],
+        ),
+        AnalyzeLayer::Arp => (
+            "ARP",
+            Some("arp"),
+            &["arp.src.proto_ipv4", "arp.dst.proto_ipv4"],
+        ),
     };
 
     let mut cmd = Command::new("tshark");
-    cmd.arg("-r")
-        .arg(input)
-        .arg("-T")
-        .arg("fields")
-        .arg("-E")
-        .arg("separator=,");
+    cmd.arg("-r").arg(input);
+    if let Some(expr) = dfilter {
+        cmd.arg("-Y").arg(expr);
+    }
+    cmd.arg("-T").arg("fields").arg("-E").arg("separator=,");
     for f in fields {
         cmd.arg("-e").arg(f);
     }
@@ -278,10 +293,19 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
 }
 
 fn render_tcp_conversations(input: &Path) -> Result<String> {
+    fn flag_set(v: Option<&&str>) -> bool {
+        match v.map(|s| s.trim().to_ascii_lowercase()) {
+            Some(s) if s == "1" || s == "true" || s == "set" => true,
+            _ => false,
+        }
+    }
+
     // src, sport, dst, dport, syn, ack, fin, rst, retransmission
     let out = Command::new("tshark")
         .arg("-r")
         .arg(input)
+        .arg("-Y")
+        .arg("tcp")
         .arg("-T")
         .arg("fields")
         .arg("-E")
@@ -334,19 +358,19 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
         let key = format!("{}:{} <-> {}:{}", cols[0], cols[1], cols[2], cols[3]);
         let st = map.entry(key).or_default();
         st.packets += 1;
-        if cols.get(4) == Some(&"1") {
+        if flag_set(cols.get(4)) {
             st.syn += 1;
         }
-        if cols.get(5) == Some(&"1") {
+        if flag_set(cols.get(5)) {
             st.ack += 1;
         }
-        if cols.get(6) == Some(&"1") {
+        if flag_set(cols.get(6)) {
             st.fin += 1;
         }
-        if cols.get(7) == Some(&"1") {
+        if flag_set(cols.get(7)) {
             st.rst += 1;
         }
-        if cols.get(8).map(|v| !v.is_empty()).unwrap_or(false) {
+        if cols.get(8).map(|v| !v.trim().is_empty()).unwrap_or(false) {
             st.retrans += 1;
         }
     }
@@ -359,9 +383,11 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
     text.push_str(&format!("input: {}\n", input.display()));
     text.push_str("layer: tcp\n");
     text.push_str(&format!("total conversations: {}\n\n", rows.len()));
-    text.push_str("  #  packets  state                    retrans  conversation\n");
     text.push_str(
-        "---  -------  -----------------------  -------  -----------------------------------\n",
+        "  #  packets  conversation                           state                    retrans\n",
+    );
+    text.push_str(
+        "---  -------  -------------------------------------  -----------------------  -------\n",
     );
 
     for (i, (conv, st)) in rows.iter().enumerate() {
@@ -385,12 +411,12 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
         };
 
         text.push_str(&format!(
-            "{:>3}  {:>7}  {:<23}  {:>7}  {}\n",
+            "{:>3}  {:>7}  {:<37}  {:<23}  {:>7}\n",
             i + 1,
             st.packets,
+            conv,
             state,
-            st.retrans,
-            conv
+            st.retrans
         ));
     }
 
