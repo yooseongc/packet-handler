@@ -47,6 +47,13 @@
 - [x] `test/ndlp1.pcap`로 `substitute_ip` 실행 검증
 - [x] `test/ndlp1.pcap`로 `snaplen` 실행 검증
 
+## Milestone 8 — 코드 리팩터링(계층 분리)
+- [x] `src/main.rs`를 엔트리포인트만 남기고 슬림화
+- [x] `src/cli.rs`로 CLI 계약 분리
+- [x] `src/processor.rs`로 I/O 및 처리 파이프라인 분리
+- [x] `src/transform.rs`로 패킷 변환 로직 분리
+- [x] `cargo check` 및 `test.sh` 재실행 확인
+
 ## 다음 단계 (권장)
 - [ ] 통합 테스트용 expected pcap 비교(fixture)
 - [ ] 처리 통계 JSON 출력 옵션
