@@ -210,22 +210,48 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
         AnalyzeLayer::Tcp => (
             "TCP",
             Some("tcp"),
-            &["ip.src", "tcp.srcport", "ip.dst", "tcp.dstport"],
+            &[
+                "eth.src",
+                "eth.dst",
+                "ip.src",
+                "tcp.srcport",
+                "ip.dst",
+                "tcp.dstport",
+            ],
         ),
         AnalyzeLayer::Icmp => (
             "ICMP",
             Some("icmp || icmpv6"),
-            &["ip.src", "ip.dst", "icmp.type", "icmpv6.type"],
+            &[
+                "eth.src",
+                "eth.dst",
+                "ip.src",
+                "ip.dst",
+                "icmp.type",
+                "icmpv6.type",
+            ],
         ),
         AnalyzeLayer::Udp => (
             "UDP",
             Some("udp"),
-            &["ip.src", "udp.srcport", "ip.dst", "udp.dstport"],
+            &[
+                "eth.src",
+                "eth.dst",
+                "ip.src",
+                "udp.srcport",
+                "ip.dst",
+                "udp.dstport",
+            ],
         ),
         AnalyzeLayer::Arp => (
             "ARP",
             Some("arp"),
-            &["arp.src.proto_ipv4", "arp.dst.proto_ipv4"],
+            &[
+                "arp.src.proto_ipv4",
+                "arp.dst.proto_ipv4",
+                "arp.src.hw_mac",
+                "arp.dst.hw_mac",
+            ],
         ),
     };
 
@@ -253,35 +279,53 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
             continue;
         }
         let key = match layer {
-            AnalyzeLayer::Ether | AnalyzeLayer::Ip | AnalyzeLayer::Arp => {
+            AnalyzeLayer::Ether | AnalyzeLayer::Ip => {
                 if cols.len() < 2 || cols[0].is_empty() || cols[1].is_empty() {
                     continue;
                 }
                 format!("{} <-> {}", cols[0], cols[1])
             }
+            AnalyzeLayer::Arp => {
+                if cols.len() < 4 || cols[0].is_empty() || cols[1].is_empty() {
+                    continue;
+                }
+                let smac = cols.get(2).copied().unwrap_or("N/A");
+                let dmac = cols.get(3).copied().unwrap_or("N/A");
+                format!("{}({}) <-> {}({})", cols[0], smac, cols[1], dmac)
+            }
             AnalyzeLayer::Tcp | AnalyzeLayer::Udp => {
-                if cols.len() < 4
-                    || cols[0].is_empty()
-                    || cols[1].is_empty()
+                if cols.len() < 6
                     || cols[2].is_empty()
                     || cols[3].is_empty()
+                    || cols[4].is_empty()
+                    || cols[5].is_empty()
                 {
                     continue;
                 }
-                format!("{}:{} <-> {}:{}", cols[0], cols[1], cols[2], cols[3])
+                let smac = cols.get(0).copied().unwrap_or("N/A");
+                let dmac = cols.get(1).copied().unwrap_or("N/A");
+                format!(
+                    "{}:{}({}) <-> {}:{}({})",
+                    cols[2], cols[3], smac, cols[4], cols[5], dmac
+                )
             }
             AnalyzeLayer::Icmp => {
-                if cols.len() < 3 || cols[0].is_empty() || cols[1].is_empty() {
+                if cols.len() < 6 || cols[2].is_empty() || cols[3].is_empty() {
                     continue;
                 }
-                let t = if cols.get(2).map(|v| !v.is_empty()).unwrap_or(false) {
-                    cols[2]
-                } else if cols.get(3).map(|v| !v.is_empty()).unwrap_or(false) {
-                    cols[3]
+                let t = if cols.get(4).map(|v| !v.is_empty()).unwrap_or(false) {
+                    cols[4]
+                } else if cols.get(5).map(|v| !v.is_empty()).unwrap_or(false) {
+                    cols[5]
                 } else {
                     "N/A"
                 };
-                format!("{} <-> {} (type={})", cols[0], cols[1], t)
+                let smac = cols.get(0).copied().unwrap_or("N/A");
+                let dmac = cols.get(1).copied().unwrap_or("N/A");
+                format!(
+                    "{}({}) <-> {}({}) (type={})",
+                    cols[2], smac, cols[3], dmac, t
+                )
             }
         };
         *map.entry(key).or_insert(0) += 1;
@@ -300,7 +344,7 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
         }
     }
 
-    // src, sport, dst, dport, syn, ack, fin, rst, retransmission
+    // smac, dmac, src, sport, dst, dport, syn, ack, fin, rst, retransmission
     let out = Command::new("tshark")
         .arg("-r")
         .arg(input)
@@ -310,6 +354,10 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
         .arg("fields")
         .arg("-E")
         .arg("separator=,")
+        .arg("-e")
+        .arg("eth.src")
+        .arg("-e")
+        .arg("eth.dst")
         .arg("-e")
         .arg("ip.src")
         .arg("-e")
@@ -347,30 +395,35 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
     let mut map: BTreeMap<String, Stat> = BTreeMap::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         let cols: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-        if cols.len() < 4
-            || cols[0].is_empty()
-            || cols[1].is_empty()
+        if cols.len() < 6
             || cols[2].is_empty()
             || cols[3].is_empty()
+            || cols[4].is_empty()
+            || cols[5].is_empty()
         {
             continue;
         }
-        let key = format!("{}:{} <-> {}:{}", cols[0], cols[1], cols[2], cols[3]);
+        let smac = cols.get(0).copied().unwrap_or("N/A");
+        let dmac = cols.get(1).copied().unwrap_or("N/A");
+        let key = format!(
+            "{}:{}({}) <-> {}:{}({})",
+            cols[2], cols[3], smac, cols[4], cols[5], dmac
+        );
         let st = map.entry(key).or_default();
         st.packets += 1;
-        if flag_set(cols.get(4)) {
+        if flag_set(cols.get(6)) {
             st.syn += 1;
         }
-        if flag_set(cols.get(5)) {
+        if flag_set(cols.get(7)) {
             st.ack += 1;
         }
-        if flag_set(cols.get(6)) {
+        if flag_set(cols.get(8)) {
             st.fin += 1;
         }
-        if flag_set(cols.get(7)) {
+        if flag_set(cols.get(9)) {
             st.rst += 1;
         }
-        if cols.get(8).map(|v| !v.trim().is_empty()).unwrap_or(false) {
+        if cols.get(10).map(|v| !v.trim().is_empty()).unwrap_or(false) {
             st.retrans += 1;
         }
     }
