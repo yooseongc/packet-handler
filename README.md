@@ -1,13 +1,14 @@
 # packet_handler
 
-Rust 기반 CLI 프로그램으로, 입력받은 패킷 파일(`.pcap`, `.pcapng`)을 가공하여 저장합니다.
+Rust 기반 CLI 프로그램으로, 입력받은 패킷 파일(`.pcap`, `.pcapng`)을 가공/필터/분석하여 저장하거나 출력합니다.
 
 ## 목표
 
 - pcap / pcapng 파일 읽기
-- IP 치환
+- IP 치환(다중 매핑)
 - snaplen 절단
-- 결과 저장
+- BPF 필터 기반 추출
+- conversation 분석 출력
 
 ## CLI 스펙
 
@@ -15,7 +16,7 @@ Rust 기반 CLI 프로그램으로, 입력받은 패킷 파일(`.pcap`, `.pcapng
 
 - `--input <PATH>`: 원본 패킷 파일 경로 (**필수**, 없으면 에러)
 - `--output <PATH>`: 결과 저장 경로 (옵션)
-  - 지정하지 않으면 **프로그램 실행 현재 경로(cwd)** 기준으로 기본 출력 경로 사용
+  - 지정하지 않으면 **프로그램 실행 현재 경로(cwd)** 기준 기본 출력 경로 사용
 - `--ignore-checksum`: 체크섬 검증/보정을 무시
 - `--overwrite`: 출력 파일이 이미 있어도 덮어쓰기 허용
 
@@ -24,12 +25,14 @@ Rust 기반 CLI 프로그램으로, 입력받은 패킷 파일(`.pcap`, `.pcapng
 1. `substitute_ip`
 
 ```bash
-packet_handler --input in.pcap substitute_ip --from 10.0.0.1 --to 192.168.0.1
+packet_handler --input in.pcap substitute_ip \
+  --map 172.19.116.187=1.1.1.1 \
+  --map 110.93.159.37=8.8.8.8
 ```
 
-- `--from <IP>`: 치환 대상 IP (**필수**)
-- `--to <IP>`: 치환할 IP (**필수**)
-- 두 인자 중 하나라도 없으면 에러
+- `--map <FROM=TO>`: 1개 이상 필수
+- 다중 매핑 동시 적용
+- IPv4↔IPv6 교차 매핑은 에러
 
 2. `snaplen`
 
@@ -40,6 +43,26 @@ packet_handler --input in.pcap snaplen 128
 - `N`: 절단 길이(bytes) (**필수**)
 - 인자가 없으면 에러
 
+3. `filter`
+
+```bash
+packet_handler --input in.pcap filter "tcp and port 443"
+```
+
+- `BPF` 구문 필수
+- BPF 구문 오류 시 즉시 실패
+- pcapng 입력은 내부적으로 pcap 변환 후 필터 적용
+
+4. `analyze [ether|ip|tcp|icmp|udp|arp]`
+
+```bash
+packet_handler --input in.pcap analyze ip
+packet_handler --input in.pcap --output ./analysis.txt analyze tcp
+```
+
+- conversation 리스트 출력
+- `--output` 없으면 콘솔, 지정 시 text 파일 저장
+
 ## 동작 규칙
 
 1. 입력 파일 포맷
@@ -47,36 +70,15 @@ packet_handler --input in.pcap snaplen 128
 
 2. 출력 파일 포맷
    - 기본적으로 입력 포맷 유지
+   - filter의 pcapng 입력은 내부 변환 후 pcap 출력
 
-3. IP 치환
-   - `substitute_ip` 실행 시 모든 패킷의 src/dst를 검사
-   - `--from`과 일치하면 `--to`로 치환
-
-4. snaplen 절단
-   - `snaplen N` 실행 시 모든 패킷을 길이 `N`으로 절단
-
-## 예시
-
-```bash
-# IP 치환
-packet_handler \
-  --input ./samples/in.pcapng \
-  --output ./samples/out.pcapng \
-  substitute_ip --from 10.10.10.5 --to 192.168.0.100
-
-# snaplen 절단
-packet_handler \
-  --input ./samples/in.pcap \
-  snaplen 128
-```
-
-## 에러 처리 정책
-
+3. 에러 처리 정책
 - `--input` 누락: 즉시 실패
 - 입력 파일 없음/접근 불가: 즉시 실패
 - 지원하지 않는 파일 포맷: 즉시 실패
-- `substitute_ip`에서 `--from`, `--to` 누락: 즉시 실패
+- `substitute_ip`에서 `--map` 누락/형식 오류: 즉시 실패
 - `snaplen` 인자 누락 또는 비정상 값: 즉시 실패
+- `filter` BPF 구문 오류: 즉시 실패
 - 출력 파일 이미 존재 + `--overwrite` 미지정: 실패
 
 ## 빌드

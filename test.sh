@@ -29,14 +29,14 @@ if "$BIN" >/dev/null 2>&1; then
 fi
 
 # 2) missing input should fail
-if "$BIN" substitute_ip --from 1.1.1.1 --to 2.2.2.2 >/dev/null 2>&1; then
+if "$BIN" substitute_ip --map 1.1.1.1=2.2.2.2 >/dev/null 2>&1; then
   echo "[FAIL] expected failure when --input is missing"
   exit 1
 fi
 
-# 3) substitute_ip missing --to should fail
-if "$BIN" --input ./nonexistent.pcap substitute_ip --from 1.1.1.1 >/dev/null 2>&1; then
-  echo "[FAIL] expected failure when --to is missing"
+# 3) substitute_ip invalid map should fail
+if "$BIN" --input ./nonexistent.pcap substitute_ip --map invalid >/dev/null 2>&1; then
+  echo "[FAIL] expected failure when --map format is invalid"
   exit 1
 fi
 
@@ -46,12 +46,21 @@ if "$BIN" --input ./nonexistent.pcap snaplen >/dev/null 2>&1; then
   exit 1
 fi
 
+# 5) filter missing bpf should fail
+if "$BIN" --input ./nonexistent.pcap filter >/dev/null 2>&1; then
+  echo "[FAIL] expected failure when filter bpf is missing"
+  exit 1
+fi
+
 echo "[test] sample packet file tests"
 SAMPLE="./test/ndlp1.pcap"
 if [[ -f "$SAMPLE" ]]; then
-  "$BIN" --input "$SAMPLE" --output ./test/out_substitute.pcap --overwrite substitute_ip --from 172.19.116.187 --to 1.1.1.1 >/dev/null
+  "$BIN" --input "$SAMPLE" --output ./test/out_substitute.pcap --overwrite substitute_ip --map 172.19.116.187=1.1.1.1 >/dev/null
   "$BIN" --input "$SAMPLE" --output ./test/out_snaplen.pcap --overwrite snaplen 64 >/dev/null
-  echo "[OK] sample packet test passed ($SAMPLE)"
+  "$BIN" --input "$SAMPLE" --output ./test/out_filter.pcap --overwrite filter "tcp" >/dev/null
+  "$BIN" --input "$SAMPLE" analyze ip >/dev/null
+  "$BIN" --input "$SAMPLE" --output ./test/out_analyze_tcp.txt --overwrite analyze tcp >/dev/null
+  echo "[OK] sample packet tests passed ($SAMPLE)"
 else
   echo "[WARN] sample packet not found, skipping packet processing test: $SAMPLE"
 fi
