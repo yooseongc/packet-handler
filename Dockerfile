@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.86-bookworm AS builder
+FROM rust:1.93-bookworm AS builder
 WORKDIR /src
 
 RUN rustup target add x86_64-unknown-linux-musl

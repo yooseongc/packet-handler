@@ -49,7 +49,7 @@ fi
 echo "[test] sample packet file tests"
 SAMPLE="./test/ndlp1.pcap"
 if [[ -f "$SAMPLE" ]]; then
-  "$BIN" --input "$SAMPLE" --output ./test/out_substitute.pcap --overwrite substitute_ip --from 10.10.10.5 --to 192.168.0.100 >/dev/null
+  "$BIN" --input "$SAMPLE" --output ./test/out_substitute.pcap --overwrite substitute_ip --from 172.19.116.187 --to 1.1.1.1 >/dev/null
   "$BIN" --input "$SAMPLE" --output ./test/out_snaplen.pcap --overwrite snaplen 64 >/dev/null
   echo "[OK] sample packet test passed ($SAMPLE)"
 else
