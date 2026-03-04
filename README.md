@@ -60,7 +60,7 @@ packet_handler --input in.pcap analyze ip
 packet_handler --input in.pcap --output ./analysis.txt analyze tcp
 ```
 
-- conversation 리스트 출력
+- conversation 리스트를 가독성 높은 텍스트 표 형식으로 출력
 - `--output` 없으면 콘솔, 지정 시 text 파일 저장
 
 ## 동작 규칙

@@ -30,6 +30,8 @@
 - [x] `analyze [ether|ip|tcp|icmp|udp|arp]` 추가
   - output 미지정 시 콘솔
   - output 지정 시 text 파일 저장
+- [x] `analyze` 출력 가독성 개선
+  - conversation 집계 후 정렬된 표 형식 출력
 
 ## 현재 상태
 - [x] 코드/문서 동기화 완료

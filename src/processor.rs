@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs::File,
     path::{Path, PathBuf},
     process::Command,
@@ -83,29 +84,9 @@ fn run_filter(cli: &Cli, bpf: &str) -> Result<()> {
 }
 
 fn run_analyze(cli: &Cli, layer: AnalyzeLayer) -> Result<()> {
-    let zarg = match layer {
-        AnalyzeLayer::Ether => "conv,eth",
-        AnalyzeLayer::Ip => "conv,ip",
-        AnalyzeLayer::Tcp => "conv,tcp",
-        AnalyzeLayer::Icmp => "conv,icmp",
-        AnalyzeLayer::Udp => "conv,udp",
-        AnalyzeLayer::Arp => "conv,eth", // fallback
-    };
+    let rows = collect_conversations(&cli.input, &layer)?;
+    let text = render_conversations(&cli.input, &layer, &rows);
 
-    let out = Command::new("tshark")
-        .arg("-r")
-        .arg(&cli.input)
-        .arg("-q")
-        .arg("-z")
-        .arg(zarg)
-        .output()
-        .with_context(|| "failed to execute tshark analyze")?;
-
-    if !out.status.success() {
-        bail!("analyze failed for layer {zarg}");
-    }
-
-    let text = String::from_utf8_lossy(&out.stdout).to_string();
     if let Some(path) = &cli.output {
         if path.exists() && !cli.overwrite {
             bail!(
@@ -211,6 +192,98 @@ fn process_pcapng(cli: &Cli, output: &Path) -> Result<()> {
 
     eprintln!("processed={total}, ip_changed={changed}, truncated={truncated}");
     Ok(())
+}
+
+fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(String, u64)>> {
+    let (display, fields): (&str, &[&str]) = match layer {
+        AnalyzeLayer::Ether => ("ETHER", &["eth.src", "eth.dst"]),
+        AnalyzeLayer::Ip => ("IP", &["ip.src", "ip.dst"]),
+        AnalyzeLayer::Tcp => ("TCP", &["ip.src", "tcp.srcport", "ip.dst", "tcp.dstport"]),
+        AnalyzeLayer::Icmp => ("ICMP", &["ip.src", "ip.dst", "icmp.type"]),
+        AnalyzeLayer::Udp => ("UDP", &["ip.src", "udp.srcport", "ip.dst", "udp.dstport"]),
+        AnalyzeLayer::Arp => ("ARP", &["arp.src.proto_ipv4", "arp.dst.proto_ipv4"]),
+    };
+
+    let mut cmd = Command::new("tshark");
+    cmd.arg("-r")
+        .arg(input)
+        .arg("-T")
+        .arg("fields")
+        .arg("-E")
+        .arg("separator=,");
+    for f in fields {
+        cmd.arg("-e").arg(f);
+    }
+
+    let out = cmd
+        .output()
+        .with_context(|| format!("failed to execute tshark analyze ({display})"))?;
+    if !out.status.success() {
+        bail!("analyze failed for layer {display}");
+    }
+
+    let mut map: BTreeMap<String, u64> = BTreeMap::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let cols: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if cols.iter().all(|c| c.is_empty()) {
+            continue;
+        }
+        let key = match layer {
+            AnalyzeLayer::Ether | AnalyzeLayer::Ip | AnalyzeLayer::Arp => {
+                if cols.len() < 2 || cols[0].is_empty() || cols[1].is_empty() {
+                    continue;
+                }
+                format!("{} <-> {}", cols[0], cols[1])
+            }
+            AnalyzeLayer::Tcp | AnalyzeLayer::Udp => {
+                if cols.len() < 4
+                    || cols[0].is_empty()
+                    || cols[1].is_empty()
+                    || cols[2].is_empty()
+                    || cols[3].is_empty()
+                {
+                    continue;
+                }
+                format!("{}:{} <-> {}:{}", cols[0], cols[1], cols[2], cols[3])
+            }
+            AnalyzeLayer::Icmp => {
+                if cols.len() < 3 || cols[0].is_empty() || cols[1].is_empty() {
+                    continue;
+                }
+                format!("{} <-> {} (type={})", cols[0], cols[1], cols[2])
+            }
+        };
+        *map.entry(key).or_insert(0) += 1;
+    }
+
+    let mut rows: Vec<(String, u64)> = map.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    Ok(rows)
+}
+
+fn render_conversations(input: &Path, layer: &AnalyzeLayer, rows: &[(String, u64)]) -> String {
+    let lname = match layer {
+        AnalyzeLayer::Ether => "ether",
+        AnalyzeLayer::Ip => "ip",
+        AnalyzeLayer::Tcp => "tcp",
+        AnalyzeLayer::Icmp => "icmp",
+        AnalyzeLayer::Udp => "udp",
+        AnalyzeLayer::Arp => "arp",
+    };
+
+    let mut out = String::new();
+    out.push_str(&format!("packet_handler analyze\n"));
+    out.push_str(&format!("input: {}\n", input.display()));
+    out.push_str(&format!("layer: {}\n", lname));
+    out.push_str(&format!("total conversations: {}\n\n", rows.len()));
+
+    out.push_str("  #  packets  conversation\n");
+    out.push_str("---  -------  ---------------------------------------------\n");
+    for (i, (conv, count)) in rows.iter().enumerate() {
+        out.push_str(&format!("{:>3}  {:>7}  {}\n", i + 1, count, conv));
+    }
+
+    out
 }
 
 fn convert_pcapng_to_pcap_via_tshark(input_pcapng: &Path, output_pcap: &Path) -> Result<()> {
