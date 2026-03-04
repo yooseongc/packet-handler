@@ -35,8 +35,8 @@
 - [x] Docker 기반 musl 빌드 `Dockerfile` 추가
 - [x] `build.sh` 추가
   - runtime 이미지 빌드
-  - artifact 이미지 빌드
-  - `./dist/packet_handler` 바이너리 추출
+  - exporter 이미지 빌드
+  - `docker cp` 없이 `dist` 볼륨 마운트로 `./dist/packet_handler` 추출
 - [x] `test.sh` 추가
   - `cargo check/test/build`
   - CLI 음수 테스트

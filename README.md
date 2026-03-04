@@ -94,6 +94,9 @@ bash ./build.sh
 빌드 후 산출물:
 - `./dist/packet_handler`
 
+참고:
+- `docker cp`를 사용하지 않고, `dist` 볼륨 마운트(`-v ./dist:/dist`)로 바이너리를 추출합니다.
+
 ## 테스트
 
 ```bash
