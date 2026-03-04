@@ -206,7 +206,11 @@ fn process_pcapng(cli: &Cli, output: &Path) -> Result<()> {
 fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(String, u64)>> {
     let (display, dfilter, fields): (&str, Option<&str>, &[&str]) = match layer {
         AnalyzeLayer::Ether => ("ETHER", Some("eth"), &["eth.src", "eth.dst"]),
-        AnalyzeLayer::Ip => ("IP", Some("ip"), &["ip.src", "ip.dst"]),
+        AnalyzeLayer::Ip => (
+            "IP",
+            Some("ip"),
+            &["eth.src", "eth.dst", "ip.src", "ip.dst"],
+        ),
         AnalyzeLayer::Tcp => (
             "TCP",
             Some("tcp"),
@@ -279,11 +283,19 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
             continue;
         }
         let key = match layer {
-            AnalyzeLayer::Ether | AnalyzeLayer::Ip => {
+            AnalyzeLayer::Ether => {
                 if cols.len() < 2 || cols[0].is_empty() || cols[1].is_empty() {
                     continue;
                 }
                 format!("{} <-> {}", cols[0], cols[1])
+            }
+            AnalyzeLayer::Ip => {
+                if cols.len() < 4 || cols[2].is_empty() || cols[3].is_empty() {
+                    continue;
+                }
+                let smac = cols.get(0).copied().unwrap_or("N/A");
+                let dmac = cols.get(1).copied().unwrap_or("N/A");
+                format!("{}({}) <-> {}({})", cols[2], smac, cols[3], dmac)
             }
             AnalyzeLayer::Arp => {
                 if cols.len() < 4 || cols[0].is_empty() || cols[1].is_empty() {

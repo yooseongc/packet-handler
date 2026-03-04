@@ -36,7 +36,8 @@
   - TCP 컬럼 순서: #, packets, conversation, state, retrans
   - ICMP에서 icmpv6 type fallback 처리
   - 레이어별 tshark display filter 적용(불필요 패킷 제외)
-  - TCP/UDP/ICMP/ARP conversation에 srcmac/dstmac 추가
+  - IP/TCP/UDP/ICMP/ARP conversation에 srcmac/dstmac 추가
+  - MAC 변경 시 distinct conversation으로 모두 출력
 
 ## 현재 상태
 - [x] 코드/문서 동기화 완료

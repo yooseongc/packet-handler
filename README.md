@@ -61,7 +61,8 @@ packet_handler --input in.pcap --output ./analysis.txt analyze tcp
 ```
 
 - conversation 리스트를 가독성 높은 텍스트 표 형식으로 출력
-- `analyze tcp/udp/icmp/arp`는 conversation에 `srcmac`, `dstmac` 정보를 함께 표시
+- `analyze ip/tcp/udp/icmp/arp`는 conversation에 `srcmac`, `dstmac` 정보를 함께 표시
+- MAC이 중간에 바뀌면 서로 다른 conversation 행으로 모두 출력
 - `analyze tcp`는 상태 요약(SYN/ACK/FIN/RST)과 재전송 건수를 함께 표시
 - `analyze icmp`는 `icmp.type` 우선, 없으면 `icmpv6.type`을 사용
 - `--output` 없으면 콘솔, 지정 시 text 파일 저장
