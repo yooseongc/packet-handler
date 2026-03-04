@@ -46,4 +46,14 @@ if "$BIN" --input ./nonexistent.pcap snaplen >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "[test] sample packet file tests"
+SAMPLE="./test/ndlp1.pcap"
+if [[ -f "$SAMPLE" ]]; then
+  "$BIN" --input "$SAMPLE" --output ./test/out_substitute.pcap --overwrite substitute_ip --from 10.10.10.5 --to 192.168.0.100 >/dev/null
+  "$BIN" --input "$SAMPLE" --output ./test/out_snaplen.pcap --overwrite snaplen 64 >/dev/null
+  echo "[OK] sample packet test passed ($SAMPLE)"
+else
+  echo "[WARN] sample packet not found, skipping packet processing test: $SAMPLE"
+fi
+
 echo "[OK] basic cli tests passed"
