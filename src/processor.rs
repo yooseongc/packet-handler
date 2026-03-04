@@ -84,8 +84,17 @@ fn run_filter(cli: &Cli, bpf: &str) -> Result<()> {
 }
 
 fn run_analyze(cli: &Cli, layer: AnalyzeLayer) -> Result<()> {
-    let rows = collect_conversations(&cli.input, &layer)?;
-    let text = render_conversations(&cli.input, &layer, &rows);
+    let text = match layer {
+        AnalyzeLayer::Tcp => render_tcp_conversations(&cli.input)?,
+        AnalyzeLayer::Icmp => {
+            let rows = collect_conversations(&cli.input, &layer)?;
+            render_conversations(&cli.input, &layer, &rows)
+        }
+        _ => {
+            let rows = collect_conversations(&cli.input, &layer)?;
+            render_conversations(&cli.input, &layer, &rows)
+        }
+    };
 
     if let Some(path) = &cli.output {
         if path.exists() && !cli.overwrite {
@@ -199,7 +208,7 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
         AnalyzeLayer::Ether => ("ETHER", &["eth.src", "eth.dst"]),
         AnalyzeLayer::Ip => ("IP", &["ip.src", "ip.dst"]),
         AnalyzeLayer::Tcp => ("TCP", &["ip.src", "tcp.srcport", "ip.dst", "tcp.dstport"]),
-        AnalyzeLayer::Icmp => ("ICMP", &["ip.src", "ip.dst", "icmp.type"]),
+        AnalyzeLayer::Icmp => ("ICMP", &["ip.src", "ip.dst", "icmp.type", "icmpv6.type"]),
         AnalyzeLayer::Udp => ("UDP", &["ip.src", "udp.srcport", "ip.dst", "udp.dstport"]),
         AnalyzeLayer::Arp => ("ARP", &["arp.src.proto_ipv4", "arp.dst.proto_ipv4"]),
     };
@@ -250,7 +259,14 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
                 if cols.len() < 3 || cols[0].is_empty() || cols[1].is_empty() {
                     continue;
                 }
-                format!("{} <-> {} (type={})", cols[0], cols[1], cols[2])
+                let t = if cols.get(2).map(|v| !v.is_empty()).unwrap_or(false) {
+                    cols[2]
+                } else if cols.get(3).map(|v| !v.is_empty()).unwrap_or(false) {
+                    cols[3]
+                } else {
+                    "N/A"
+                };
+                format!("{} <-> {} (type={})", cols[0], cols[1], t)
             }
         };
         *map.entry(key).or_insert(0) += 1;
@@ -259,6 +275,126 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
     let mut rows: Vec<(String, u64)> = map.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     Ok(rows)
+}
+
+fn render_tcp_conversations(input: &Path) -> Result<String> {
+    // src, sport, dst, dport, syn, ack, fin, rst, retransmission
+    let out = Command::new("tshark")
+        .arg("-r")
+        .arg(input)
+        .arg("-T")
+        .arg("fields")
+        .arg("-E")
+        .arg("separator=,")
+        .arg("-e")
+        .arg("ip.src")
+        .arg("-e")
+        .arg("tcp.srcport")
+        .arg("-e")
+        .arg("ip.dst")
+        .arg("-e")
+        .arg("tcp.dstport")
+        .arg("-e")
+        .arg("tcp.flags.syn")
+        .arg("-e")
+        .arg("tcp.flags.ack")
+        .arg("-e")
+        .arg("tcp.flags.fin")
+        .arg("-e")
+        .arg("tcp.flags.reset")
+        .arg("-e")
+        .arg("tcp.analysis.retransmission")
+        .output()
+        .with_context(|| "failed to execute tshark analyze (TCP detailed)")?;
+    if !out.status.success() {
+        bail!("analyze failed for layer TCP");
+    }
+
+    #[derive(Default)]
+    struct Stat {
+        packets: u64,
+        syn: u64,
+        ack: u64,
+        fin: u64,
+        rst: u64,
+        retrans: u64,
+    }
+
+    let mut map: BTreeMap<String, Stat> = BTreeMap::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let cols: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if cols.len() < 4
+            || cols[0].is_empty()
+            || cols[1].is_empty()
+            || cols[2].is_empty()
+            || cols[3].is_empty()
+        {
+            continue;
+        }
+        let key = format!("{}:{} <-> {}:{}", cols[0], cols[1], cols[2], cols[3]);
+        let st = map.entry(key).or_default();
+        st.packets += 1;
+        if cols.get(4) == Some(&"1") {
+            st.syn += 1;
+        }
+        if cols.get(5) == Some(&"1") {
+            st.ack += 1;
+        }
+        if cols.get(6) == Some(&"1") {
+            st.fin += 1;
+        }
+        if cols.get(7) == Some(&"1") {
+            st.rst += 1;
+        }
+        if cols.get(8).map(|v| !v.is_empty()).unwrap_or(false) {
+            st.retrans += 1;
+        }
+    }
+
+    let mut rows: Vec<(String, Stat)> = map.into_iter().collect();
+    rows.sort_by(|a, b| b.1.packets.cmp(&a.1.packets).then_with(|| a.0.cmp(&b.0)));
+
+    let mut text = String::new();
+    text.push_str("packet_handler analyze\n");
+    text.push_str(&format!("input: {}\n", input.display()));
+    text.push_str("layer: tcp\n");
+    text.push_str(&format!("total conversations: {}\n\n", rows.len()));
+    text.push_str("  #  packets  state                    retrans  conversation\n");
+    text.push_str(
+        "---  -------  -----------------------  -------  -----------------------------------\n",
+    );
+
+    for (i, (conv, st)) in rows.iter().enumerate() {
+        let mut flags = Vec::new();
+        if st.syn > 0 {
+            flags.push("SYN");
+        }
+        if st.ack > 0 {
+            flags.push("ACK");
+        }
+        if st.fin > 0 {
+            flags.push("FIN");
+        }
+        if st.rst > 0 {
+            flags.push("RST");
+        }
+        let state = if flags.is_empty() {
+            "N/A".to_string()
+        } else {
+            flags.join("+")
+        };
+
+        text.push_str(&format!(
+            "{:>3}  {:>7}  {:<23}  {:>7}  {}\n",
+            i + 1,
+            st.packets,
+            state,
+            st.retrans,
+            conv
+        ));
+    }
+
+    Ok(text)
 }
 
 fn render_conversations(input: &Path, layer: &AnalyzeLayer, rows: &[(String, u64)]) -> String {
