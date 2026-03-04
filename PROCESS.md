@@ -38,7 +38,9 @@
   - 레이어별 tshark display filter 적용(불필요 패킷 제외)
   - IP/TCP/UDP/ICMP/ARP conversation에 srcmac/dstmac 추가
   - MAC 변경 시 distinct conversation으로 모두 출력
+  - ether는 `mac_flow` 컬럼 제외
+  - tcp conversation 컬럼 폭 확장
 
 ## 현재 상태
 - [x] 코드/문서 동기화 완료
-- [ ] 샘플 pcap 기반 filter/analyze 실데이터 회귀 추가 권장 (현재 `test/ndlp1.pcap` 파일 부재)
+- [x] 샘플 pcap 기반 filter/analyze 실데이터 회귀 확인
