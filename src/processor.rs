@@ -295,7 +295,7 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
                 }
                 let smac = cols.get(0).copied().unwrap_or("N/A");
                 let dmac = cols.get(1).copied().unwrap_or("N/A");
-                format!("{}({}) <-> {}({})", cols[2], smac, cols[3], dmac)
+                format!("{} <-> {} || {} -> {}", cols[2], cols[3], smac, dmac)
             }
             AnalyzeLayer::Arp => {
                 if cols.len() < 4 || cols[0].is_empty() || cols[1].is_empty() {
@@ -303,7 +303,7 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
                 }
                 let smac = cols.get(2).copied().unwrap_or("N/A");
                 let dmac = cols.get(3).copied().unwrap_or("N/A");
-                format!("{}({}) <-> {}({})", cols[0], smac, cols[1], dmac)
+                format!("{} <-> {} || {} -> {}", cols[0], cols[1], smac, dmac)
             }
             AnalyzeLayer::Tcp | AnalyzeLayer::Udp => {
                 if cols.len() < 6
@@ -317,8 +317,8 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
                 let smac = cols.get(0).copied().unwrap_or("N/A");
                 let dmac = cols.get(1).copied().unwrap_or("N/A");
                 format!(
-                    "{}:{}({}) <-> {}:{}({})",
-                    cols[2], cols[3], smac, cols[4], cols[5], dmac
+                    "{}:{} <-> {}:{} || {} -> {}",
+                    cols[2], cols[3], cols[4], cols[5], smac, dmac
                 )
             }
             AnalyzeLayer::Icmp => {
@@ -335,8 +335,8 @@ fn collect_conversations(input: &Path, layer: &AnalyzeLayer) -> Result<Vec<(Stri
                 let smac = cols.get(0).copied().unwrap_or("N/A");
                 let dmac = cols.get(1).copied().unwrap_or("N/A");
                 format!(
-                    "{}({}) <-> {}({}) (type={})",
-                    cols[2], smac, cols[3], dmac, t
+                    "{} <-> {} (type={}) || {} -> {}",
+                    cols[2], cols[3], t, smac, dmac
                 )
             }
         };
@@ -418,8 +418,8 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
         let smac = cols.get(0).copied().unwrap_or("N/A");
         let dmac = cols.get(1).copied().unwrap_or("N/A");
         let key = format!(
-            "{}:{}({}) <-> {}:{}({})",
-            cols[2], cols[3], smac, cols[4], cols[5], dmac
+            "{}:{} <-> {}:{} || {} -> {}",
+            cols[2], cols[3], cols[4], cols[5], smac, dmac
         );
         let st = map.entry(key).or_default();
         st.packets += 1;
@@ -449,10 +449,10 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
     text.push_str("layer: tcp\n");
     text.push_str(&format!("total conversations: {}\n\n", rows.len()));
     text.push_str(
-        "  #  packets  conversation                           state                    retrans\n",
+        "  #  packets  conversation                       state                    retrans  mac_flow\n",
     );
     text.push_str(
-        "---  -------  -------------------------------------  -----------------------  -------\n",
+        "---  -------  ---------------------------------  -----------------------  -------  -------------------------\n",
     );
 
     for (i, (conv, st)) in rows.iter().enumerate() {
@@ -475,13 +475,19 @@ fn render_tcp_conversations(input: &Path) -> Result<String> {
             flags.join("+")
         };
 
+        let (conv_part, mac_flow) = conv
+            .split_once(" || ")
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .unwrap_or_else(|| (conv.clone(), "N/A".to_string()));
+
         text.push_str(&format!(
-            "{:>3}  {:>7}  {:<37}  {:<23}  {:>7}\n",
+            "{:>3}  {:>7}  {:<33}  {:<23}  {:>7}  {}\n",
             i + 1,
             st.packets,
-            conv,
+            conv_part,
             state,
-            st.retrans
+            st.retrans,
+            mac_flow
         ));
     }
 
@@ -504,10 +510,22 @@ fn render_conversations(input: &Path, layer: &AnalyzeLayer, rows: &[(String, u64
     out.push_str(&format!("layer: {}\n", lname));
     out.push_str(&format!("total conversations: {}\n\n", rows.len()));
 
-    out.push_str("  #  packets  conversation\n");
-    out.push_str("---  -------  ---------------------------------------------\n");
+    out.push_str("  #  packets  conversation                              mac_flow\n");
+    out.push_str(
+        "---  -------  ----------------------------------------  -------------------------\n",
+    );
     for (i, (conv, count)) in rows.iter().enumerate() {
-        out.push_str(&format!("{:>3}  {:>7}  {}\n", i + 1, count, conv));
+        let (conv_part, mac_flow) = conv
+            .split_once(" || ")
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .unwrap_or_else(|| (conv.clone(), "N/A".to_string()));
+        out.push_str(&format!(
+            "{:>3}  {:>7}  {:<40}  {}\n",
+            i + 1,
+            count,
+            conv_part,
+            mac_flow
+        ));
     }
 
     out
